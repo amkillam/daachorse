@@ -16,7 +16,7 @@ use crate::utils::FromU32;
 use crate::{MatchKind, Output};
 pub use builder::DoubleArrayAhoCorasickBuilder;
 use iter::{
-    FindIterator, FindOverlappingIterator, FindOverlappingNoSuffixIterator, LestmostFindIterator,
+    FindIterator, FindOverlappingIterator, FindOverlappingNoSuffixIterator, LeftmostFindIterator,
     U8SliceIterator,
 };
 
@@ -49,7 +49,17 @@ const DEAD_STATE_IDX: u32 = 1;
 ///
 /// The maximum number of patterns is limited to 2^24-1. If a larger number of patterns is given,
 /// [`DaachorseError`] will be reported.
-#[derive(Clone, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(crate = "serde"))]
+#[cfg_attr(
+    feature = "serde",
+    serde(bound(
+        serialize = "V: serde::Serialize",
+        deserialize = "V: serde::Deserialize<'de>",
+    ))
+)]
+#[cfg_attr(feature = "bitcode", derive(bitcode::Encode, bitcode::Decode))]
 pub struct DoubleArrayAhoCorasick<V> {
     states: Vec<State>,
     outputs: Vec<Output<V>>,
@@ -512,7 +522,7 @@ impl<V> DoubleArrayAhoCorasick<V> {
     ///
     /// assert_eq!(None, it.next());
     /// ```
-    pub fn leftmost_find_iter<P>(&self, haystack: P) -> LestmostFindIterator<'_, P, V>
+    pub fn leftmost_find_iter<P>(&self, haystack: P) -> LeftmostFindIterator<'_, P, V>
     where
         P: AsRef<[u8]>,
     {
@@ -520,7 +530,7 @@ impl<V> DoubleArrayAhoCorasick<V> {
             self.match_kind.is_leftmost(),
             "Error: match_kind must be leftmost."
         );
-        LestmostFindIterator {
+        LeftmostFindIterator {
             pma: self,
             haystack,
             pos: 0,
@@ -710,7 +720,14 @@ impl<V> DoubleArrayAhoCorasick<V> {
 }
 
 #[derive(Clone, Copy, Default, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(crate = "serde"))]
+#[cfg_attr(feature = "bitcode", derive(bitcode::Encode, bitcode::Decode))]
 struct State {
+    #[cfg_attr(
+        feature = "serde",
+        serde(with = "crate::serializer::nzu32_option_serde")
+    )]
     base: Option<NonZeroU32>,
     fail: u32,
     // 3 bytes for output_pos and 1 byte for check.
@@ -1016,5 +1033,57 @@ mod tests {
         assert_eq!(pma.outputs, other.outputs);
         assert_eq!(pma.match_kind, other.match_kind);
         assert_eq!(pma.num_states, other.num_states);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_serde_state() {
+        let mut opos_ch = U24nU8::default();
+        opos_ch.set_a(U24::try_from(57).unwrap());
+        opos_ch.set_b(77);
+        let x = State {
+            base: NonZeroU32::new(42),
+            fail: 13,
+            opos_ch,
+        };
+        let serialized = serde_json::to_string(&x).unwrap();
+        let y: State = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(x, y);
+    }
+
+    #[cfg(feature = "bitcode")]
+    #[test]
+    fn test_bitcode_state() {
+        let mut opos_ch = U24nU8::default();
+        opos_ch.set_a(U24::try_from(57).unwrap());
+        opos_ch.set_b(77);
+        let x = State {
+            base: NonZeroU32::new(42),
+            fail: 13,
+            opos_ch,
+        };
+        let encoded = bitcode::encode(&x);
+        let y = bitcode::decode::<State>(&encoded).unwrap();
+        assert_eq!(x, y);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_serde_pma() {
+        let patterns = vec!["abba", "baaba", "ababa"];
+        let pma = DoubleArrayAhoCorasick::<u32>::new(patterns).unwrap();
+        let serialized = serde_json::to_string(&pma).unwrap();
+        let other: DoubleArrayAhoCorasick<u32> = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(pma, other);
+    }
+
+    #[cfg(feature = "bitcode")]
+    #[test]
+    fn test_bitcode_pma() {
+        let patterns = vec!["abba", "baaba", "ababa"];
+        let pma = DoubleArrayAhoCorasick::<u32>::new(patterns).unwrap();
+        let encoded = bitcode::encode(&pma);
+        let other = bitcode::decode::<DoubleArrayAhoCorasick<u32>>(&encoded).unwrap();
+        assert_eq!(pma, other);
     }
 }

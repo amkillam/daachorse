@@ -3,6 +3,9 @@ use alloc::vec::Vec;
 use crate::serializer::Serializable;
 
 #[derive(Clone, Copy, Default, Eq, PartialEq, Debug, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(crate = "serde"))]
+#[cfg_attr(feature = "bitcode", derive(bitcode::Encode, bitcode::Decode))]
 pub struct U24(u32);
 
 impl U24 {
@@ -28,6 +31,9 @@ impl TryFrom<u32> for U24 {
 }
 
 #[derive(Clone, Copy, Default, Eq, PartialEq, Debug, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(crate = "serde"))]
+#[cfg_attr(feature = "bitcode", derive(bitcode::Encode, bitcode::Decode))]
 pub struct U24nU8(u32);
 
 impl U24nU8 {
@@ -67,5 +73,47 @@ impl Serializable for U24nU8 {
     #[inline(always)]
     fn serialized_bytes() -> usize {
         u32::serialized_bytes()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[cfg(any(feature = "serde", feature = "bitcode"))]
+    use super::*;
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_serde_u24() {
+        let x = U24(42);
+        let serialized = serde_json::to_string(&x).unwrap();
+        let y: U24 = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(x, y);
+    }
+
+    #[cfg(feature = "bitcode")]
+    #[test]
+    fn test_bitcode_u24() {
+        let x = U24(42);
+        let encoded = bitcode::encode(&x);
+        let y = bitcode::decode::<U24>(&encoded).unwrap();
+        assert_eq!(x, y);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_serde_u24nu8() {
+        let x = U24nU8(0x1234_5678);
+        let serialized = serde_json::to_string(&x).unwrap();
+        let y: U24nU8 = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(x, y);
+    }
+
+    #[cfg(feature = "bitcode")]
+    #[test]
+    fn test_bitcode_u24nu8() {
+        let x = U24nU8(0x1234_5678);
+        let encoded = bitcode::encode(&x);
+        let y = bitcode::decode::<U24nU8>(&encoded).unwrap();
+        assert_eq!(x, y);
     }
 }

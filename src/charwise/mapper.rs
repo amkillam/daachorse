@@ -1,12 +1,14 @@
 use alloc::vec::Vec;
 
 use crate::serializer::{Serializable, SerializableVec};
-
 use crate::utils::FromU32;
 
 pub const INVALID_CODE: u32 = u32::MAX;
 
 #[derive(Default, Clone, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(crate = "serde"))]
+#[cfg_attr(feature = "bitcode", derive(bitcode::Encode, bitcode::Decode))]
 pub struct CodeMapper {
     table: Vec<u32>,
     alphabet_size: u32,
@@ -108,6 +110,28 @@ mod tests {
         assert_eq!(data.len(), mapper.serialized_bytes());
         let (other, rest) = CodeMapper::deserialize_from_slice(&data);
         assert!(rest.is_empty());
+        assert_eq!(mapper, other);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_serde() {
+        let freqs = vec![3, 6, 0, 2, 3, 0, 3];
+        let mapper = CodeMapper::new(&freqs);
+
+        let serialized = serde_json::to_string(&mapper).unwrap();
+        let other: CodeMapper = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(mapper, other);
+    }
+
+    #[cfg(feature = "bitcode")]
+    #[test]
+    fn test_bitcode() {
+        let freqs = vec![3, 6, 0, 2, 3, 0, 3];
+        let mapper = CodeMapper::new(&freqs);
+
+        let encoded = bitcode::encode(&mapper);
+        let other = bitcode::decode::<CodeMapper>(&encoded).unwrap();
         assert_eq!(mapper, other);
     }
 }

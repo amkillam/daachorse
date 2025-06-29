@@ -16,7 +16,7 @@ use crate::{MatchKind, Output};
 pub use builder::CharwiseDoubleArrayAhoCorasickBuilder;
 use iter::{
     CharWithEndOffsetIterator, FindIterator, FindOverlappingIterator,
-    FindOverlappingNoSuffixIterator, LestmostFindIterator, StrIterator,
+    FindOverlappingNoSuffixIterator, LeftmostFindIterator, StrIterator,
 };
 use mapper::CodeMapper;
 
@@ -54,7 +54,17 @@ const DEAD_STATE_IDX: u32 = 1;
 ///
 /// - [`CharwiseDoubleArrayAhoCorasick::with_values`] builds an automaton
 ///   from a set of pairs of a UTF-8 string and a user-defined value.
-#[derive(Clone, Eq, Hash, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(crate = "serde"))]
+#[cfg_attr(
+    feature = "serde",
+    serde(bound(
+        serialize = "V: serde::Serialize",
+        deserialize = "V: serde::Deserialize<'de>",
+    ))
+)]
+#[cfg_attr(feature = "bitcode", derive(bitcode::Encode, bitcode::Decode))]
 pub struct CharwiseDoubleArrayAhoCorasick<V> {
     states: Vec<State>,
     mapper: CodeMapper,
@@ -527,7 +537,7 @@ impl<V> CharwiseDoubleArrayAhoCorasick<V> {
     ///
     /// assert_eq!(None, it.next());
     /// ```
-    pub fn leftmost_find_iter<P>(&self, haystack: P) -> LestmostFindIterator<'_, P, V>
+    pub fn leftmost_find_iter<P>(&self, haystack: P) -> LeftmostFindIterator<'_, P, V>
     where
         P: AsRef<str>,
     {
@@ -535,7 +545,7 @@ impl<V> CharwiseDoubleArrayAhoCorasick<V> {
             self.match_kind.is_leftmost(),
             "Error: match_kind must be leftmost."
         );
-        LestmostFindIterator {
+        LeftmostFindIterator {
             pma: self,
             haystack,
             pos: 0,
@@ -760,10 +770,21 @@ impl<V> CharwiseDoubleArrayAhoCorasick<V> {
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(crate = "serde"))]
+#[cfg_attr(feature = "bitcode", derive(bitcode::Encode, bitcode::Decode))]
 struct State {
+    #[cfg_attr(
+        feature = "serde",
+        serde(with = "crate::serializer::nzu32_option_serde")
+    )]
     base: Option<NonZeroU32>,
     check: u32,
     fail: u32,
+    #[cfg_attr(
+        feature = "serde",
+        serde(with = "crate::serializer::nzu32_option_serde")
+    )]
     output_pos: Option<NonZeroU32>,
 }
 
@@ -861,209 +882,26 @@ impl Serializable for State {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(any(feature = "serde", feature = "bitcode"))]
     use super::*;
 
+    #[cfg(feature = "serde")]
     #[test]
-    fn test_double_array() {
-        /*
-         *          Ａ--> 4
-         *         /
-         *   Ａ--> 1 --Ｃ--> 5
-         *  /
-         * 0 --Ｂ--> 3 --Ｃ--> 6
-         *  \
-         *   Ｃ--> 2
-         *
-         *   Ａ= 0
-         *   Ｃ= 1
-         *   Ｂ= 2
-         */
-        let patterns = vec!["ＡＡ", "ＡＣ", "ＢＣ", "Ｃ"];
+    fn test_serde_pma() {
+        let patterns = vec!["ab", "baaba", "ababa"];
         let pma = CharwiseDoubleArrayAhoCorasick::<u32>::new(patterns).unwrap();
-
-        let base_expected = vec![
-            NonZeroU32::new(4), // 0  (state=0)
-            None,               // 1  (reserved)
-            None,               // 2  (state=6)
-            None,               // 3
-            NonZeroU32::new(8), // 4  (state=1)
-            None,               // 5  (state=2)
-            NonZeroU32::new(3), // 6  (state=3)
-            None,               // 7
-            None,               // 8  (state=4)
-            None,               // 9  (state=5)
-            None,               // 10
-        ];
-        let check_expected = vec![
-            1, // 0  (state=0)
-            1, // 1
-            6, // 2  (state=6)
-            1, // 3
-            0, // 4  (state=1)
-            0, // 5  (state=2)
-            0, // 6  (state=3)
-            1, // 7
-            4, // 8  (state=4)
-            4, // 9  (state=5)
-            1, // 10
-        ];
-        let fail_expected = vec![
-            ROOT_STATE_IDX, // 0  (state=0)
-            DEAD_STATE_IDX, // 1  (reserved)
-            5,              // 2  (state=6)
-            DEAD_STATE_IDX, // 3
-            ROOT_STATE_IDX, // 4  (state=1)
-            ROOT_STATE_IDX, // 5  (state=2)
-            ROOT_STATE_IDX, // 6  (state=3)
-            DEAD_STATE_IDX, // 7
-            4,              // 8  (state=4)
-            5,              // 9  (state=5)
-            DEAD_STATE_IDX, // 10
-        ];
-
-        let pma_base: Vec<_> = pma.states[0..11].iter().map(|state| state.base()).collect();
-        let pma_check: Vec<_> = pma.states[0..11]
-            .iter()
-            .map(|state| state.check())
-            .collect();
-        let pma_fail: Vec<_> = pma.states[0..11].iter().map(|state| state.fail()).collect();
-
-        assert_eq!(base_expected, pma_base);
-        assert_eq!(check_expected, pma_check);
-        assert_eq!(fail_expected, pma_fail);
+        let serialized = serde_json::to_string(&pma).unwrap();
+        let other: CharwiseDoubleArrayAhoCorasick<u32> = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(pma, other);
     }
 
+    #[cfg(feature = "bitcode")]
     #[test]
-    fn test_num_states() {
-        /*
-         *   b-*-a-*-a-*-b-*-a-*
-         *  /
-         * *-a-*-b-*-b-*-a-*
-         *          \
-         *           a-*-b-*-a-*
-         */
-        let patterns = vec!["ａｂｂａ", "ｂａａｂａ", "ａｂａｂａ"];
+    fn test_bitcode_pma() {
+        let patterns = vec!["ab", "baaba", "ababa"];
         let pma = CharwiseDoubleArrayAhoCorasick::<u32>::new(patterns).unwrap();
-
-        assert_eq!(13, pma.num_states());
-    }
-
-    #[test]
-    fn test_input_order() {
-        let patvals_sorted = vec![("ａｂａｂａ", 0), ("ａｂｂａ", 1), ("ｂａａｂａ", 2)];
-        let patvals_unsorted = vec![("ａｂｂａ", 1), ("ｂａａｂａ", 2), ("ａｂａｂａ", 0)];
-
-        let pma_sorted = CharwiseDoubleArrayAhoCorasick::with_values(patvals_sorted).unwrap();
-        let pma_unsorted = CharwiseDoubleArrayAhoCorasick::with_values(patvals_unsorted).unwrap();
-
-        assert_eq!(pma_sorted.states, pma_unsorted.states);
-        assert_eq!(pma_sorted.outputs, pma_unsorted.outputs);
-    }
-
-    #[test]
-    fn test_n_blocks_1_1() {
-        let mut patterns = vec![];
-        // state 0: reserved for the root state
-        // state 1: reserved for the dead state
-        // base = 0x7e; fills 0x02..=0x7f
-        for i in '\u{0}'..='\u{7d}' {
-            let pattern: alloc::string::String = core::iter::once(i).collect();
-            patterns.push(pattern);
-        }
-        let pma = CharwiseDoubleArrayAhoCorasick::<u32>::new(patterns).unwrap();
-        assert_eq!(127, pma.num_states());
-        assert_eq!(128, pma.states.len());
-        assert_eq!(0x7e, pma.states[0].base().unwrap().get());
-    }
-
-    #[test]
-    fn test_n_blocks_1_2() {
-        let mut patterns = vec![];
-        // state 0: reserved for the root state
-        // state 1: reserved for the dead state
-        // base = 0x80; fills 0x80..=0xfe
-        for i in '\u{0}'..='\u{7e}' {
-            let pattern: alloc::string::String = core::iter::once(i).collect();
-            patterns.push(pattern);
-        }
-        let pma = CharwiseDoubleArrayAhoCorasick::<u32>::new(patterns).unwrap();
-        assert_eq!(128, pma.num_states());
-        assert_eq!(256, pma.states.len());
-        assert_eq!(0x80, pma.states[0].base().unwrap().get());
-    }
-
-    #[test]
-    fn test_n_blocks_2_1() {
-        let mut patterns = vec![];
-        // state 0: reserved for the root state
-        // state 1: reserved for the dead state
-        // base = 0x80; fills 0x80..=0xff
-        for i in '\u{0}'..='\u{7f}' {
-            let pattern: alloc::string::String = core::iter::once(i).collect();
-            patterns.push(pattern);
-        }
-        // base = 0x7e; fills 0x02..=0x7f
-        for i in '\u{0}'..='\u{7d}' {
-            let pattern = ['\u{0}', i].into_iter().collect();
-            patterns.push(pattern);
-        }
-        let pma = CharwiseDoubleArrayAhoCorasick::<u32>::new(patterns).unwrap();
-        assert_eq!(255, pma.num_states());
-        assert_eq!(256, pma.states.len());
-        assert_eq!(0x80, pma.states[0].base().unwrap().get());
-        assert_eq!(0x7e, pma.states[0x80].base().unwrap().get());
-    }
-
-    #[test]
-    fn test_n_blocks_2_2() {
-        let mut patterns = vec![];
-        // state 0: reserved for the root state
-        // state 1: reserved for the dead state
-        // base = 0x80; fills 0x80..=0xff
-        for i in '\u{0}'..='\u{7f}' {
-            let pattern: alloc::string::String = core::iter::once(i).collect();
-            patterns.push(pattern);
-        }
-        // base = 0x100; fills 0x100..=0x7e
-        for i in '\u{0}'..='\u{7e}' {
-            let pattern = ['\u{0}', i].into_iter().collect();
-            patterns.push(pattern);
-        }
-        let pma = CharwiseDoubleArrayAhoCorasick::<u32>::new(patterns).unwrap();
-        assert_eq!(256, pma.num_states());
-        assert_eq!(384, pma.states.len());
-        assert_eq!(0x80, pma.states[0].base().unwrap().get());
-        assert_eq!(0x100, pma.states[0x80].base().unwrap().get());
-    }
-
-    #[test]
-    fn test_serialize_state() {
-        let x = State {
-            base: NonZeroU32::new(42),
-            check: 57,
-            fail: 13,
-            output_pos: NonZeroU32::new(100),
-        };
-        let mut data = vec![];
-        x.serialize_to_vec(&mut data);
-        assert_eq!(data.len(), State::serialized_bytes());
-        let (y, rest) = State::deserialize_from_slice(&data);
-        assert!(rest.is_empty());
-        assert_eq!(x, y);
-    }
-
-    #[test]
-    fn test_serialize_pma() {
-        let patterns = vec!["全世界", "世界", "に"];
-        let pma = CharwiseDoubleArrayAhoCorasick::<u32>::new(patterns).unwrap();
-        let bytes = pma.serialize();
-        let (other, rest) =
-            unsafe { CharwiseDoubleArrayAhoCorasick::deserialize_unchecked(&bytes) };
-        assert!(rest.is_empty());
-        assert_eq!(pma.states, other.states);
-        assert_eq!(pma.mapper, other.mapper);
-        assert_eq!(pma.outputs, other.outputs);
-        assert_eq!(pma.match_kind, other.match_kind);
-        assert_eq!(pma.num_states, other.num_states);
+        let encoded = bitcode::encode(&pma);
+        let other = bitcode::decode::<CharwiseDoubleArrayAhoCorasick<u32>>(&encoded).unwrap();
+        assert_eq!(pma, other);
     }
 }

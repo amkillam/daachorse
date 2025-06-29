@@ -192,3 +192,24 @@ mod tests {
         assert_eq!(x, y);
     }
 }
+
+#[cfg(feature = "serde")]
+pub mod nzu32_option_serde {
+    use core::num::NonZeroU32;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S>(n: &Option<NonZeroU32>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        n.map_or(0, NonZeroU32::get).serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<Option<NonZeroU32>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let u = u32::deserialize(deserializer)?;
+        Ok(NonZeroU32::new(u))
+    }
+}

@@ -207,9 +207,23 @@ pub use charwise::{CharwiseDoubleArrayAhoCorasick, CharwiseDoubleArrayAhoCorasic
 pub use serializer::Serializable;
 
 #[derive(Copy, Clone, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(crate = "serde"))]
+#[cfg_attr(
+    feature = "serde",
+    serde(bound(
+        serialize = "V: serde::Serialize",
+        deserialize = "V: serde::Deserialize<'de>",
+    ))
+)]
+#[cfg_attr(feature = "bitcode", derive(bitcode::Encode, bitcode::Decode))]
 struct Output<V> {
     value: V,
     length: u32,
+    #[cfg_attr(
+        feature = "serde",
+        serde(with = "crate::serializer::nzu32_option_serde")
+    )]
     parent: Option<NonZeroU32>,
 }
 
@@ -280,6 +294,16 @@ where
 
 /// Match result.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(crate = "serde"))]
+#[cfg_attr(
+    feature = "serde",
+    serde(bound(
+        serialize = "V: serde::Serialize",
+        deserialize = "V: serde::Deserialize<'de>",
+    ))
+)]
+#[cfg_attr(feature = "bitcode", derive(bitcode::Encode, bitcode::Decode))]
 pub struct Match<V> {
     length: usize,
     end: usize,
@@ -318,6 +342,9 @@ where
 /// A search option of the Aho-Corasick automaton
 /// specified in [`DoubleArrayAhoCorasickBuilder::match_kind`].
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(crate = "serde"))]
+#[cfg_attr(feature = "bitcode", derive(bitcode::Encode, bitcode::Decode))]
 #[repr(u8)]
 pub enum MatchKind {
     /// The standard match semantics, which enables
@@ -413,6 +440,9 @@ impl Serializable for MatchKind {
 /// assert_eq!((0, 1), (m.start(), m.end()));
 /// ```
 #[derive(Clone, Copy, Default, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "serde", serde(crate = "serde"))]
+#[cfg_attr(feature = "bitcode", derive(bitcode::Encode, bitcode::Decode))]
 pub struct Empty;
 
 impl From<usize> for Empty {
@@ -448,6 +478,76 @@ mod tests {
         assert_eq!(data.len(), MatchKind::serialized_bytes());
         let (y, rest) = MatchKind::deserialize_from_slice(&data);
         assert!(rest.is_empty());
+        assert_eq!(x, y);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_serde_output() {
+        let x = Output {
+            value: 42u32,
+            length: 57,
+            parent: NonZeroU32::new(13),
+        };
+        let serialized = serde_json::to_string(&x).unwrap();
+        let y: Output<u32> = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(x, y);
+    }
+
+    #[cfg(feature = "bitcode")]
+    #[test]
+    fn test_bitcode_output() {
+        let x = Output {
+            value: 42u32,
+            length: 57,
+            parent: NonZeroU32::new(13),
+        };
+        let encoded = bitcode::encode(&x);
+        let y = bitcode::decode::<Output<u32>>(&encoded).unwrap();
+        assert_eq!(x, y);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_serde_match() {
+        let x = Match {
+            length: 4,
+            end: 10,
+            value: 42u32,
+        };
+        let serialized = serde_json::to_string(&x).unwrap();
+        let y: Match<u32> = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(x, y);
+    }
+
+    #[cfg(feature = "bitcode")]
+    #[test]
+    fn test_bitcode_match() {
+        let x = Match {
+            length: 4,
+            end: 10,
+            value: 42u32,
+        };
+        let encoded = bitcode::encode(&x);
+        let y = bitcode::decode::<Match<u32>>(&encoded).unwrap();
+        assert_eq!(x, y);
+    }
+
+    #[cfg(feature = "serde")]
+    #[test]
+    fn test_serde_match_kind() {
+        let x = MatchKind::LeftmostLongest;
+        let serialized = serde_json::to_string(&x).unwrap();
+        let y: MatchKind = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(x, y);
+    }
+
+    #[cfg(feature = "bitcode")]
+    #[test]
+    fn test_bitcode_match_kind() {
+        let x = MatchKind::LeftmostLongest;
+        let encoded = bitcode::encode(&x);
+        let y = bitcode::decode::<MatchKind>(&encoded).unwrap();
         assert_eq!(x, y);
     }
 }
